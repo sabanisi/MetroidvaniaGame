@@ -33,10 +33,4 @@ public class Block : MonoBehaviour
     public Vector3 GetCurPos() { return _transform.position; }
     
     public Vector3 GetPrePos() { return _transform.position - DisPos; }
-    //
-    // public Vector3 GetDPos() { return _parent == null ? Vector3.zero : _parent.GetDPos(); }
-    //
-    // public Vector3 GetSize() { return _halfSize; }
-    //
-    // public void SetParent(ObjectMover parent) { _parent = _parent; }
 }

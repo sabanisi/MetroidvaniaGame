@@ -4,11 +4,6 @@ using UnityEngine;
 
 public abstract class SimpleObjectMover : MonoBehaviour
 {
-    void Start()
-    {
-        
-    }
-    
     void Update()
     {
         move();
