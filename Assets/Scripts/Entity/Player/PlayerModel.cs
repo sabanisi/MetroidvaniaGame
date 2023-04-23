@@ -25,6 +25,7 @@ namespace Entity.Player
                 constantInfo,
                 buttonInputDetector);
 
+            _physicsSimulator.DieListener = Die;
             _isDied = false;
             _isClear = false;
         }

@@ -84,10 +84,10 @@ namespace Entity.Player
             return _pos;
         }
         
-        private void InitializeParameters(Vector3 prePos)
+        private void InitializeParameters(Vector3 pos)
         {
-            _pos = prePos;
-            _prePos = prePos;
+            _pos = pos;
+            _prePos = pos;
             // on the ground
             if (_isVCollide < 0)
             {
