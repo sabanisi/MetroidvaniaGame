@@ -1,17 +1,16 @@
-using System.Collections;
-using System.Collections.Generic;
+using Entity.Player;
 using UnityEngine;
 
 public class BlockCollisionDetector : MonoBehaviour
 {
-    [SerializeField] private Player _player;
+    [SerializeField] private PlayerPresenter _player;
     private void OnTriggerEnter2D(Collider2D collision)
     {
-        _player.AddDetectedBlock(collision);
+        _player.AddDetectedBlockListener(collision);
     }
 
     private void OnTriggerExit2D(Collider2D collision)
     {
-        _player.RemoveDetectedBlock(collision);
+        _player.RemoveDetectedBlockListener(collision);
     }
 }

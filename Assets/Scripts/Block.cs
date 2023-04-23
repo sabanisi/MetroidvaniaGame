@@ -30,6 +30,6 @@ public class Block : MonoBehaviour
     public Vector3 GetCurPos() { return _transform.position; }
 
     public Vector3 GetPrePos() { return _transform.position - DisPos; }
-
+    
     public Vector3 DisPos => _parent == null ? Vector3.zero : _parent.DisPos; 
 }
