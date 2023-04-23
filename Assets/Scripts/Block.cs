@@ -1,3 +1,4 @@
+using Unity.VisualScripting;
 using UnityEngine;
 
 public class Block : MonoBehaviour
@@ -11,8 +12,7 @@ public class Block : MonoBehaviour
         private set { _blockType = value; }
     }
     public Vector3 HalfSize { get; private set; } // half boxcollider size
-    private Vector3 _prePos; // position of 1 frame before
-    public Vector3 DisPos { get; private set; } // displacement at 1 frame
+    private SimpleObjectMover _parent;
 
     void Start()
     {
@@ -20,17 +20,16 @@ public class Block : MonoBehaviour
         HalfSize = new Vector3(_collider.size.x * Mathf.Abs(scale.x) / 2f,
                                 _collider.size.y * Mathf.Abs(scale.y) / 2f,
                                 0);
-        _prePos = _transform.position;
-    }
-
-    void Update()
-    {
-        Vector3 curPos = _transform.position;
-        DisPos = curPos - _prePos;
-        _prePos = curPos;
+        Transform parentTf = _transform.root;
+        if (!parentTf.Equals(_transform))
+        {
+            _parent = parentTf.GetComponent<SimpleObjectMover>();
+        }
     }
 
     public Vector3 GetCurPos() { return _transform.position; }
-    
+
     public Vector3 GetPrePos() { return _transform.position - DisPos; }
+    
+    public Vector3 DisPos => _parent == null ? Vector3.zero : _parent.DisPos; 
 }
