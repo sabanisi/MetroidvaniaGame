@@ -169,6 +169,8 @@ MonoBehaviour:
   _initGravity: 60
   _dGravity: 40
   _maxJumpTime: 0.2
+  _accelerationMs: 150
+  _decelerationMs: 100
 --- !u!114 &5049610845924751844
 MonoBehaviour:
   m_ObjectHideFlags: 0

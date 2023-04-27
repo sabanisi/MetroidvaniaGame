@@ -38,6 +38,8 @@ namespace Entity.Player
         private float _jumpTime; // time until jump is possible for counting
         private float _nowGravity; // now gravity
         private Vector3 _playerSpeed;
+        private float _pushingLeftTime;
+        private float _pushingRightTime;
 
 
         public PlayerPhysicsSimulator(
@@ -67,6 +69,9 @@ namespace Entity.Player
             _jumpTime = 0f;
             _nowGravity = 0f;
             _playerSpeed=Vector3.zero;
+            
+            _pushingLeftTime = 0f;
+            _pushingRightTime = 0f;
         }
         
         /// <summary>
@@ -100,18 +105,33 @@ namespace Entity.Player
         
         private void Walk()
         {
+            float accSec = Time.deltaTime / _constantInfo.AccelerationMs * 1000f;
+            float decSec = Time.deltaTime / _constantInfo.DecelerationMs * 1000f;
             if (_input.IsLeft) // left
             {
-                _playerSpeed.x = -_constantInfo.WalkSpeed;
+                _pushingLeftTime += accSec;
+                _pushingRightTime -= decSec;
             }
             else if (_input.IsRight) // right
             {
-                _playerSpeed.x = _constantInfo.WalkSpeed;
+                _pushingRightTime += accSec;
+                _pushingLeftTime -= decSec;
             }
             else
             {
-                _playerSpeed.x = 0f;
+                _pushingLeftTime -= decSec;
+                _pushingRightTime -= decSec;
             }
+            _pushingLeftTime = Mathf.Clamp01(_pushingLeftTime);
+            _pushingRightTime = Mathf.Clamp01(_pushingRightTime);
+            _playerSpeed.x = _constantInfo.WalkSpeed 
+                             * (-WalkAccelerationRatio(_pushingLeftTime) 
+                                + WalkAccelerationRatio(_pushingRightTime));
+        }
+
+        private float WalkAccelerationRatio(float sec)
+        {
+            return sec * sec;
         }
         
         private void Jump()

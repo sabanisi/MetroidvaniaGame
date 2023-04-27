@@ -18,5 +18,9 @@ namespace Entity.Player
         public float DGravity => _dGravity;
         [Header("最大ジャンプ時間")][SerializeField] private float _maxJumpTime;
         public float MaxJumpTime => _maxJumpTime;
+        [Header("歩行加速時間")][SerializeField] private float _accelerationMs;
+        public float AccelerationMs => _accelerationMs;
+        [Header("歩行減速時間")][SerializeField] private float _decelerationMs;
+        public float DecelerationMs => _decelerationMs;
     }
 }
