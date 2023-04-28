@@ -23,24 +23,33 @@ namespace Entity.Player
         private const float COLLISION_ERROR = 1e-4f;
 
         private bool _isBeforeJump;//1フレーム前のジャンプキーの入力
-        private bool _isJump;
-        
+
         private Vector3 _colliderHalfSize;
         private Vector3 _colliderOffset;
         private float _colliderUp, _colliderDown, _colliderRight, _colliderLeft;
 
         private Vector3 _pos;
         private Vector3 _prePos; // previous position setting
+        
+        // for collision with block
         private int _isHCollide; // 0: not, 1: right, -1: left
         private int _isVCollide; // 0: not, 1: up, -1: down
         private Block _blockHColliding; // the block which is touched horizontally
         private Block _blockVColliding; // the block which is touched vertically
-        private float _jumpTime; // time until jump is possible for counting
-        private float _nowGravity; // now gravity
-        private Vector3 _playerSpeed;
+
+        // for walk
         private float _pushingLeftTime;
         private float _pushingRightTime;
-
+        
+        // for jump
+        private float _jumpTime; // time until jump is possible for counting
+        private bool _isJump;
+        private bool _isConsumeGroundJump;
+        private int _airJumpCount; // for counting a series of jumping until landing
+        private float _coyoteTime; // for counting jump key input possible time after falling from the cliff
+        private float _extraJumpTime; // for counting jump key input possible time before landing
+        private bool _jumpInputBuffer;
+        private Vector3 _inertia;
 
         public PlayerPhysicsSimulator(
             Vector2 colliderSize,
@@ -53,8 +62,7 @@ namespace Entity.Player
             _input = buttonInputDetector;
             
             _isBeforeJump = false;
-            _isJump = false;
-            
+
             _colliderHalfSize = colliderSize / 2f;
             _colliderOffset = colliderOffset;
             _colliderUp = (_colliderHalfSize.y + _colliderOffset.y) * Mathf.Abs(localScale.y);
@@ -66,12 +74,18 @@ namespace Entity.Player
             _isVCollide = 0;
             _blockHColliding = null;
             _blockVColliding = null;
-            _jumpTime = 0f;
-            _nowGravity = 0f;
-            _playerSpeed=Vector3.zero;
             
             _pushingLeftTime = 0f;
             _pushingRightTime = 0f;
+            
+            _jumpTime = .5f;
+            _isJump = false;
+            _isConsumeGroundJump = false;
+            _airJumpCount = _constantInfo.MaxAirJumpCount; // cannot jump at the first
+            _coyoteTime = 0f;
+            _extraJumpTime = 0f;
+            _jumpInputBuffer = false;
+            _inertia = Vector3.zero;
         }
         
         /// <summary>
@@ -81,38 +95,26 @@ namespace Entity.Player
         /// <returns>シミュレート後の位置</returns>
         public Vector3 Update(Vector3 prePos)
         {
-            InitializeParameters(prePos);
+            _pos = prePos;
+            _prePos = prePos;
             Walk();
-            Jump();
-            UpdatePos();
+            JumpAndFall();
+            FollowBlock();
             BlockCollision();
+            _isBeforeJump = _input.IsJump;
             return _pos;
         }
-        
-        private void InitializeParameters(Vector3 pos)
-        {
-            _pos = pos;
-            _prePos = pos;
-            // on the ground
-            if (_isVCollide < 0)
-            {
-                _nowGravity = _constantInfo.InitGravity;
-                _jumpTime = 0f;
-                _playerSpeed.y = 0f;
-                _isJump = false;
-            }
-        }
-        
+
         private void Walk()
         {
             float accSec = Time.deltaTime / _constantInfo.AccelerationMs * 1000f;
             float decSec = Time.deltaTime / _constantInfo.DecelerationMs * 1000f;
-            if (_input.IsLeft) // left
+            if (_input.IsLeft)
             {
                 _pushingLeftTime += accSec;
                 _pushingRightTime -= decSec;
             }
-            else if (_input.IsRight) // right
+            else if (_input.IsRight)
             {
                 _pushingRightTime += accSec;
                 _pushingLeftTime -= decSec;
@@ -124,146 +126,177 @@ namespace Entity.Player
             }
             _pushingLeftTime = Mathf.Clamp01(_pushingLeftTime);
             _pushingRightTime = Mathf.Clamp01(_pushingRightTime);
-            _playerSpeed.x = _constantInfo.WalkSpeed 
-                             * (-WalkAccelerationRatio(_pushingLeftTime) 
-                                + WalkAccelerationRatio(_pushingRightTime));
+            float accRatio = _pushingRightTime*_pushingRightTime - _pushingLeftTime*_pushingLeftTime;
+            _pos.x += _constantInfo.WalkSpeed * accRatio * Time.deltaTime;
         }
 
-        private float WalkAccelerationRatio(float sec)
+        private void JumpAndFall()
         {
-            return sec * sec;
-        }
-        
-        private void Jump()
-        {
-            // add initial speed of jumping
-            if (_isVCollide < 0 && !_isJump && !_isBeforeJump && _input.IsJump)
+            // buffer jump key input
+            _extraJumpTime += Time.deltaTime;
+            if (_input.IsJump && !_isBeforeJump)
             {
-                _playerSpeed.y = _constantInfo.JumpSpeed;
-                _isJump = true;
+                _jumpInputBuffer = true;
+                _extraJumpTime = 0f;
             }
-
-            if (_isJump && _jumpTime < _constantInfo.MaxJumpTime && _input.IsJump)
+            if (_extraJumpTime > _constantInfo.MaxExtraJumpMs * .001f)
             {
-                // count time until jump is possible
-                _jumpTime += Time.deltaTime;
+                _jumpInputBuffer = false;
+                _extraJumpTime = 0f;
             }
-            else
-            {
-                _isJump = false;
-            }
-
-            _isBeforeJump = _input.IsJump;
-        }
-        
-        private void UpdatePos()
-        {
-            // based on speed
-            ApplyGravity();
-            _pos += _playerSpeed * Time.deltaTime;
-            // follow to the colliding block
-            FollowBlock();
-        }
-        
-        private void BlockCollision()
-    {
-        if (_blockList.Count == 0)
-        {
-            _isHCollide = 0;
-            _isVCollide = 0;
-            return;
-        }
-        bool isUpdateH = false, isUpdateV = false;
-        
-        foreach (Block block in _blockList)
-        {
-            Vector3 otherPos = block.GetCurPos();
-            Vector3 otherPrePos = block.GetPrePos();
-            Vector3 otherSize = block.HalfSize;
-            Vector3 otherSize2 = otherSize - new Vector3(COLLISION_ERROR, COLLISION_ERROR, 0f) / 2f;
             
-            // horizontal collision
-            if (block.BlockType == BLOCK_TYPE.BLOCK)
+            // inertia
+            if (!_isConsumeGroundJump && _blockVColliding != null && _isVCollide < 0)
             {
-                if (_pos.y+_colliderUp > otherPos.y-otherSize2.y
-                    && _pos.y-_colliderDown < otherPos.y+otherSize2.y)
-                {
-                    if ((_prePos.x+_colliderHalfSize.x) - (otherPrePos.x-otherSize.x) < COLLISION_ERROR
-                        && (otherPos.x-otherSize.x) - (_pos.x+_colliderHalfSize.x) < COLLISION_ERROR) // right
-                    {
-                        if (_isHCollide < 0) { DieListener(); return; } // crushed
-                        _pos.x = otherPos.x - otherSize.x - _colliderHalfSize.x;
-                        _isHCollide = 1;
-                        _blockHColliding = block;
-                        isUpdateH = true;
-                    }
-                    else if ((otherPrePos.x+otherSize.x) - (_prePos.x-_colliderHalfSize.x) < COLLISION_ERROR
-                            && (_pos.x-_colliderHalfSize.x) - (otherPos.x+otherSize.x) < COLLISION_ERROR) // left
-                    {
-                        if (_isHCollide > 0) { DieListener(); return; } // crushed
-                        _pos.x = otherPos.x + otherSize.x + _colliderHalfSize.x;
-                        _isHCollide = -1;
-                        _blockHColliding = block;
-                        isUpdateH = true;
-                    }
-                }
+                _inertia = _blockVColliding.DisPos;
             }
 
-            // vertical collision
-            if (_pos.x+_colliderHalfSize.x > otherPos.x-otherSize2.x
-                && _pos.x-_colliderHalfSize.x < otherPos.x+otherSize2.x)
+            // one the ground
+            if (_isVCollide < 0)
             {
-                if ((_prePos.y+_colliderUp) - (otherPrePos.y-otherSize.y) < COLLISION_ERROR
-                    && (otherPos.y-otherSize.y) - (_pos.y+_colliderUp) < COLLISION_ERROR
-                    && block.BlockType == BLOCK_TYPE.BLOCK) // up
+                _jumpTime = .5f;
+                _coyoteTime = 0f;
+                _isJump = false;
+                _isConsumeGroundJump = false;
+                _airJumpCount = 0;
+                // ground jump
+                if (/*_input.IsJump && !_isBeforeJump*/_jumpInputBuffer)
                 {
-                    if (_isVCollide < 0) { DieListener(); return; } // crushed
-                    _pos.y = otherPos.y - otherSize.y - _colliderUp;
-                    _isVCollide = 1;
-                    _blockVColliding = block;
-                    isUpdateV = true;
+                    _jumpTime = 0f;
+                    _isJump = true;
+                    _isConsumeGroundJump = true;
+                    Debug.Log("ground jump");
                 }
-                else if ((otherPrePos.y+otherSize.y) - (_prePos.y-_colliderDown) < COLLISION_ERROR
-                        && (_pos.y-_colliderDown) - (otherPos.y+otherSize.y) < COLLISION_ERROR) // down
-                {
-                    if (_isVCollide > 0) { DieListener(); return; } // crushed
-                    _pos.y = otherPos.y + otherSize.y + _colliderDown;
-                    _isVCollide = -1;
-                    _blockVColliding = block;
-                    isUpdateV = true;
-                }
+                else { return; }
             }
-        }
-        if (!isUpdateH)
-        {
-            _isHCollide = 0;
-            _blockHColliding = null;
-        }
-        if (!isUpdateV)
-        {
-            _isVCollide = 0;
-            _blockVColliding = null;
-        }
-    }
-        
-        private void ApplyGravity()
-        {
-            // collide with ceiling
-            if (_isVCollide > 0)
+
+            // collide with the ceiling while ascending
+            if (_isVCollide > 0 && _jumpTime < .5f)
             {
-                if (_playerSpeed.y > 0) { _playerSpeed.y = 0f; }
-                _jumpTime = _constantInfo.MaxJumpTime;
+                _jumpTime = .5f;
                 _isJump = false;
             }
-
-            // apply gravity
-            if (_isVCollide >= 0 && !_isJump)
+            
+            // in midair
+            if (_isVCollide == 0)
             {
-                _nowGravity = _nowGravity > _constantInfo.MinGravity ? _nowGravity - _constantInfo.DGravity * Time.deltaTime : _constantInfo.MinGravity;
-                _playerSpeed.y = _playerSpeed.y > _constantInfo.MaxFallSpeed ? _playerSpeed.y - _nowGravity * Time.deltaTime : _constantInfo.MaxFallSpeed;
+                if (_coyoteTime < _constantInfo.MaxCoyoteMs * .001f)
+                { // coyote jump
+                    if (_input.IsJump && !_isBeforeJump && !_isConsumeGroundJump)
+                    {
+                        _jumpTime = 0f;
+                        _isJump = true;
+                        _isConsumeGroundJump = true;
+                        Debug.Log("coyote jump");
+                    }
+                    _coyoteTime += Time.deltaTime;
+                }
+                else
+                {
+                    if (_input.IsJump && !_isBeforeJump && _airJumpCount < _constantInfo.MaxAirJumpCount)
+                    { // air jump
+                        _jumpTime = 0f;
+                        _isJump = true;
+                        _airJumpCount++;
+                        Debug.Log("air jump: " + _airJumpCount);
+                    }
+                }
+                // release or not press jump key
+                if (_isJump && !_input.IsJump) { _isJump = false; }
+                if (!_isJump && _jumpTime < .35f) { _jumpTime = .35f; }
+            }
+            
+            // move vertically; jump or fall
+            float dTime = Time.deltaTime / _constantInfo.MaxJumpMs * 1000f;
+            _jumpTime += dTime;
+            _jumpTime = Mathf.Clamp01(_jumpTime);
+            //_pos.y += Mathf.Cos(Mathf.PI * _jumpTime) * Mathf.PI * _constantInfo.MaxJumpHeight * dTime;
+            _pos.y += 8f * (.5f - _jumpTime) * dTime * _constantInfo.MaxJumpHeight;
+                      //* (1f - (float)_airJumpCount/(float)(_constantInfo.MaxAirJumpCount+1));
+            //if (_isConsumeGroundJump && _airJumpCount <= 0) { _pos += _inertia; }
+        }
+
+        private void BlockCollision()
+        {
+            if (_blockList.Count == 0)
+            {
+                _isHCollide = 0;
+                _isVCollide = 0;
+                return;
+            }
+            bool isUpdateH = false, isUpdateV = false;
+            
+            foreach (Block block in _blockList)
+            {
+                Vector3 otherPos = block.GetCurPos();
+                Vector3 otherPrePos = block.GetPrePos();
+                Vector3 otherSize = block.HalfSize;
+                Vector3 otherSize2 = otherSize - new Vector3(COLLISION_ERROR, COLLISION_ERROR, 0f) / 2f;
+                
+                // horizontal collision
+                if (block.BlockType == BLOCK_TYPE.BLOCK)
+                {
+                    if (_pos.y+_colliderUp > otherPos.y-otherSize2.y
+                        && _pos.y-_colliderDown < otherPos.y+otherSize2.y)
+                    {
+                        if ((_prePos.x+_colliderHalfSize.x) - (otherPrePos.x-otherSize.x) < COLLISION_ERROR
+                            && (otherPos.x-otherSize.x) - (_pos.x+_colliderHalfSize.x) < COLLISION_ERROR) // right
+                        {
+                            if (_isHCollide < 0) { DieListener(); return; } // crushed
+                            _pos.x = otherPos.x - otherSize.x - _colliderHalfSize.x;
+                            _isHCollide = 1;
+                            _blockHColliding = block;
+                            isUpdateH = true;
+                        }
+                        else if ((otherPrePos.x+otherSize.x) - (_prePos.x-_colliderHalfSize.x) < COLLISION_ERROR
+                                && (_pos.x-_colliderHalfSize.x) - (otherPos.x+otherSize.x) < COLLISION_ERROR) // left
+                        {
+                            if (_isHCollide > 0) { DieListener(); return; } // crushed
+                            _pos.x = otherPos.x + otherSize.x + _colliderHalfSize.x;
+                            _isHCollide = -1;
+                            _blockHColliding = block;
+                            isUpdateH = true;
+                        }
+                    }
+                }
+    
+                // vertical collision
+                if (_pos.x+_colliderHalfSize.x > otherPos.x-otherSize2.x
+                    && _pos.x-_colliderHalfSize.x < otherPos.x+otherSize2.x)
+                {
+                    if ((_prePos.y+_colliderUp) - (otherPrePos.y-otherSize.y) < COLLISION_ERROR
+                        && (otherPos.y-otherSize.y) - (_pos.y+_colliderUp) < COLLISION_ERROR
+                        && block.BlockType == BLOCK_TYPE.BLOCK) // up
+                    {
+                        if (_isVCollide < 0) { DieListener(); return; } // crushed
+                        _pos.y = otherPos.y - otherSize.y - _colliderUp;
+                        _isVCollide = 1;
+                        _blockVColliding = block;
+                        isUpdateV = true;
+                    }
+                    else if ((otherPrePos.y+otherSize.y) - (_prePos.y-_colliderDown) < COLLISION_ERROR
+                            && (_pos.y-_colliderDown) - (otherPos.y+otherSize.y) < COLLISION_ERROR) // down
+                    {
+                        if (_isVCollide > 0) { DieListener(); return; } // crushed
+                        _pos.y = otherPos.y + otherSize.y + _colliderDown;
+                        _isVCollide = -1;
+                        _blockVColliding = block;
+                        isUpdateV = true;
+                    }
+                }
+            }
+            if (!isUpdateH)
+            {
+                _isHCollide = 0;
+                _blockHColliding = null;
+            }
+            if (!isUpdateV)
+            {
+                _isVCollide = 0;
+                _blockVColliding = null;
             }
         }
-        
+
         private void FollowBlock()
         {
             // lean to the block
@@ -287,7 +320,6 @@ namespace Entity.Player
                 else if (_isVCollide > 0 && otherDisPos.y < 0) // collide from below
                 {
                     _pos.y += otherDisPos.y;
-                    _playerSpeed.y = otherDisPos.y/Time.deltaTime;
                 }
             }
         }
