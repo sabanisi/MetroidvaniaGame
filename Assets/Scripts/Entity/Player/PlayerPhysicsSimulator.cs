@@ -50,6 +50,7 @@ namespace Entity.Player
         private float _extraJumpTime; // for counting jump key input possible time before landing
         private bool _jumpInputBuffer;
         private Vector3 _inertia;
+        private bool _isFall;
 
         public PlayerPhysicsSimulator(
             Vector2 colliderSize,
@@ -86,6 +87,7 @@ namespace Entity.Player
             _extraJumpTime = 0f;
             _jumpInputBuffer = false;
             _inertia = Vector3.zero;
+            //_isFall = true;
         }
         
         /// <summary>
@@ -97,8 +99,11 @@ namespace Entity.Player
         {
             _pos = prePos;
             _prePos = prePos;
+            _isFall = true; // if not input jump key on the ground, then false.
+            BufferJumpInput();
             Walk();
-            JumpAndFall();
+            Jump();
+            ControlVMoving();
             FollowBlock();
             BlockCollision();
             _isBeforeJump = _input.IsJump;
@@ -130,7 +135,7 @@ namespace Entity.Player
             _pos.x += _constantInfo.WalkSpeed * accRatio * Time.deltaTime;
         }
 
-        private void JumpAndFall()
+        private void BufferJumpInput()
         {
             // buffer jump key input
             _extraJumpTime += Time.deltaTime;
@@ -144,13 +149,10 @@ namespace Entity.Player
                 _jumpInputBuffer = false;
                 _extraJumpTime = 0f;
             }
-            
-            // inertia
-            if (!_isConsumeGroundJump && _blockVColliding != null && _isVCollide < 0)
-            {
-                _inertia = _blockVColliding.DisPos;
-            }
+        }
 
+        private void Jump()
+        {
             // one the ground
             if (_isVCollide < 0)
             {
@@ -165,9 +167,12 @@ namespace Entity.Player
                     _jumpTime = 0f;
                     _isJump = true;
                     _isConsumeGroundJump = true;
-                    Debug.Log("ground jump");
+                    //Debug.Log("ground jump");
                 }
-                else { return; }
+                else
+                {
+                    _isFall = false;
+                }
             }
 
             // collide with the ceiling while ascending
@@ -187,32 +192,37 @@ namespace Entity.Player
                         _jumpTime = 0f;
                         _isJump = true;
                         _isConsumeGroundJump = true;
-                        Debug.Log("coyote jump");
+                        //Debug.Log("coyote jump");
                     }
                     _coyoteTime += Time.deltaTime;
                 }
-                else
-                {
-                    if (_input.IsJump && !_isBeforeJump && _airJumpCount < _constantInfo.MaxAirJumpCount)
-                    { // air jump
-                        _jumpTime = 0f;
-                        _isJump = true;
-                        _airJumpCount++;
-                        Debug.Log("air jump: " + _airJumpCount);
-                    }
+                else if (_input.IsJump && !_isBeforeJump && _airJumpCount < _constantInfo.MaxAirJumpCount)
+                { // air jump
+                    _jumpTime = 0f;
+                    _isJump = true;
+                    _airJumpCount++;
+                    Debug.Log("air jump: " + _airJumpCount);
                 }
                 // release or not press jump key
                 if (_isJump && !_input.IsJump) { _isJump = false; }
                 if (!_isJump && _jumpTime < .35f) { _jumpTime = .35f; }
             }
-            
-            // move vertically; jump or fall
+        }
+
+        private void ControlVMoving()
+        {
+            if (!_isFall) { return; }
+            // // inertia
+            // if (!_isConsumeGroundJump && _blockVColliding != null && _isVCollide < 0)
+            // {
+            //     _inertia = _blockVColliding.DisPos;
+            // }
             float dTime = Time.deltaTime / _constantInfo.MaxJumpMs * 1000f;
             _jumpTime += dTime;
             _jumpTime = Mathf.Clamp01(_jumpTime);
             //_pos.y += Mathf.Cos(Mathf.PI * _jumpTime) * Mathf.PI * _constantInfo.MaxJumpHeight * dTime;
             _pos.y += 8f * (.5f - _jumpTime) * dTime * _constantInfo.MaxJumpHeight;
-                      //* (1f - (float)_airJumpCount/(float)(_constantInfo.MaxAirJumpCount+1));
+            //* (1f - (float)_airJumpCount/(float)(_constantInfo.MaxAirJumpCount+1));
             //if (_isConsumeGroundJump && _airJumpCount <= 0) { _pos += _inertia; }
         }
 
